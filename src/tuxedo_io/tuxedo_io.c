@@ -227,6 +227,18 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 			break;
 		case W_UW_MODE:
 			copy_result = copy_from_user(&argument, (int32_t *) arg, sizeof(argument));
+			uw_ec_read_addr(0x51, 0x07, &reg_read_return);
+			result = reg_read_return.bytes.data_low;
+			argument &= ~ 0x90;
+			argument |= result & 0x90;
+			uw_ec_write_addr(0x51, 0x07, argument & 0xff, 0x00, &reg_write_return);
+			break;
+		case W_UW_POWER_MODE:
+			copy_result = copy_from_user(&argument, (int32_t *) arg, sizeof(argument));
+			uw_ec_read_addr(0x51, 0x07, &reg_read_return);
+			result = reg_read_return.bytes.data_low;
+			argument &= 0x90;
+			argument |= result & (~ 0x90);
 			uw_ec_write_addr(0x51, 0x07, argument & 0xff, 0x00, &reg_write_return);
 			break;
 		case W_UW_MODE_ENABLE:
