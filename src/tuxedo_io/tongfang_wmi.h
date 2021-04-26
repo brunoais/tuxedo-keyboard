@@ -282,7 +282,27 @@ static void uniwill_init(void)
     
     // FIXME Hard set balanced profile until we have implemented a way to
     // switch it while tuxedo_io is loaded
-    uw_ec_write_addr(0x51, 0x07, 0x00, 0x00, &reg_write_return);
+    // Sets power mode
+    //uw_ec_write_addr(0x51, 0x07, 0x00, 0x00, &reg_write_return);
+    
+    uw_ec_read_addr(0x51, 0x07, &reg_read_return);
+    pr_info("0x51 0x07 data: %0#6x  %0#6x\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low);
+
+    // uw_ec_write_addr(0x51, 0x07, 0xec, 0xec, &reg_write_return);
+    //uw_ec_write_addr(0x51, 0x07, 0xb0, 0xb0, &reg_write_return);
+    // uw_ec_write_addr(0x51, 0x07, 0x7c, 0x7c, &reg_write_return);
+
+
+    // uw_ec_write_addr(0x51, 0x07, 0x90, 0x90, &reg_write_return);
+    // msleep(3000);
+    // uw_ec_write_addr(0x51, 0x07, 0x0, 0x0, &reg_write_return);
+    // msleep(3000);
+    // uw_ec_write_addr(0x51, 0x07, 0x80, 0x80, &reg_write_return);
+    // msleep(3000);
+    // uw_ec_write_addr(0x51, 0x07, 0x10, 0x10, &reg_write_return);
+    // msleep(3000);
+    // uw_ec_write_addr(0x51, 0x07, 0x0, 0x0, &reg_write_return);
+
 
     // Set manual-mode fan-curve in 0x0743 - 0x0747
 	// Some kind of default fan-curve is stored in 0x0786 - 0x078a: Using it to initialize manual-mode fan-curve

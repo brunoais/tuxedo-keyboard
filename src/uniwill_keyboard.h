@@ -57,6 +57,15 @@
 #define UNIWILL_BRIGHTNESS_DEFAULT		UNIWILL_BRIGHTNESS_MAX * 0.30
 #define UNIWILL_COLOR_DEFAULT			0xffffff
 
+
+#define UNIWILL_POWER_MODE_MASK 0x90
+#define UNIWILL_POWER_MODE_MIN 0x80
+#define UNIWILL_POWER_MODE_MED 0x00
+#define UNIWILL_POWER_MODE_MAX 0x10
+#define UNIWILL_POWER_MODE_UNSET(var) (var) & ( ~ UNIWILL_POWER_MODE_MASK)
+#define UNIWILL_POWER_MODE(var) (var) & UNIWILL_POWER_MODE_MASK
+
+
 struct tuxedo_keyboard_driver uniwill_keyboard_driver;
 
 struct kbd_led_state_uw_t {
@@ -228,6 +237,44 @@ static void uniwill_write_kbd_bl_reset(void)
 	__uw_ec_write_addr(0x8c, 0x07, 0x10, 0x00, &reg_write_return);
 }
 
+static int uniwill_cycle_power_mode(void)
+{
+
+	int write;
+	union uw_ec_read_return reg_read_return;
+	union uw_ec_write_return reg_write_return;
+
+	__uw_ec_read_addr(0x51, 0x07, &reg_read_return);
+
+	write = UNIWILL_POWER_MODE_UNSET(reg_read_return.bytes.data_low);
+	
+	switch(UNIWILL_POWER_MODE(reg_read_return.bytes.data_low)){
+		case UNIWILL_POWER_MODE_MIN:
+			TUXEDO_DEBUG("Power mode to medium\n");
+			break;
+		case UNIWILL_POWER_MODE_MED:
+			TUXEDO_DEBUG("Power mode to min\n");
+			write |= UNIWILL_POWER_MODE_MAX;
+			break;
+		case UNIWILL_POWER_MODE_MAX:
+			TUXEDO_DEBUG("Power mode to max\n");
+			write |= UNIWILL_POWER_MODE_MIN;
+			break;
+		default:
+			TUXEDO_INFO("Unexpected mode for power mode (%0#6x) (%0#6x)\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low);
+			write |= UNIWILL_POWER_MODE_MED;
+	}
+
+	TUXEDO_INFO("Writing new mode (%0#6x)(%0#6x) -> (%0#6x)(%0#6x)\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low, write, write);
+	__uw_ec_write_addr(0x51, 0x07, write, write, &reg_write_return);
+
+	return write;
+
+}
+
+
+
+
 static void uniwill_wmi_handle_event(u32 value, void *context, u32 guid_nr)
 {
 	struct acpi_buffer response = { ACPI_ALLOCATE_BUFFER, NULL };
@@ -237,29 +284,39 @@ static void uniwill_wmi_handle_event(u32 value, void *context, u32 guid_nr)
 	int code;
 
 	status = wmi_get_event_data(value, &response);
+	TUXEDO_INFO("[Ev %d] got status - %d\n", guid_nr, status);
 	if (status != AE_OK) {
 		TUXEDO_ERROR("uniwill handle event -> bad event status\n");
 		return;
 	}
+	TUXEDO_INFO("[Ev %d] got status OK - %d\n", guid_nr, status);
 
 	obj = (union acpi_object *) response.pointer;
 	if (obj) {
+		TUXEDO_INFO("[Ev %d] Have pointer - %d; type:%d\n", guid_nr, status, obj->type);
 		if (obj->type == ACPI_TYPE_INTEGER) {
 			code = obj->integer.value;
+			TUXEDO_INFO("[Ev %d] Have pointer - %d; type:%d code:  %d (%0#6x)\n", guid_nr, status, obj->type, code, code);
 			if (!sparse_keymap_report_known_event(uniwill_keyboard_driver.input_device, code, 1, true)) {
 				TUXEDO_DEBUG("[Ev %d] Unknown key - %d (%0#6x)\n", guid_nr, code, code);
 			}
 
+
 			// Special key combination when mode change key is pressed
 			if (code == 0xb0) {
-				input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 1);
-				input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 1);
-				input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 1);
-				input_sync(uniwill_keyboard_driver.input_device);
-				input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 0);
-				input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 0);
-				input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 0);
-				input_sync(uniwill_keyboard_driver.input_device);
+				TUXEDO_INFO("[Ev %d] Power mode pressed - %d\n", guid_nr, code, code);
+
+				uniwill_cycle_power_mode();
+
+
+				// input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 1);
+				// input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 1);
+				// input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 1);
+				// input_sync(uniwill_keyboard_driver.input_device);
+				// input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 0);
+				// input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 0);
+				// input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 0);
+				// input_sync(uniwill_keyboard_driver.input_device);
 			}
 
 			// Keyboard backlight brightness toggle
@@ -364,19 +421,84 @@ static ssize_t uw_color_string_store(struct device *child,
 	return size;
 }
 
+
+static ssize_t uw_power_mode_show(struct device *child,
+				 struct device_attribute *attr, char *buffer)
+{
+	union uw_ec_read_return reg_read_return;
+
+	__uw_ec_read_addr(0x51, 0x07, &reg_read_return);
+
+	switch(reg_read_return.bytes.data_low & 0x90){
+		case UNIWILL_POWER_MODE_MIN:
+			sprintf(buffer, "Power mode: low\n");
+			break;
+		case UNIWILL_POWER_MODE_MED:
+			sprintf(buffer, "Power mode: medium\n");
+			break;
+		case UNIWILL_POWER_MODE_MAX:
+			sprintf(buffer, "Power mode: max\n");
+			break;
+		default:
+			sprintf(buffer, "Power mode: unknown\n");
+	}
+	return strlen(buffer);
+}
+
+static ssize_t uw_power_mode_store(struct device *child,
+				   struct device_attribute *attr,
+				   const char *buffer, size_t size)
+{
+	union uw_ec_write_return reg_write_return;
+	union uw_ec_read_return reg_read_return;
+	int write;
+
+	if(size > 2){
+		return size;
+	}
+
+	__uw_ec_read_addr(0x51, 0x07, &reg_read_return);
+	write = reg_read_return.bytes.data_low;
+	write &= 0x6F;
+
+	switch(buffer[0]){
+		case '0':
+			write |= UNIWILL_POWER_MODE_MIN;
+			break;
+		case '1':
+			break;
+		case '2':
+				write |= UNIWILL_POWER_MODE_MAX;
+			break;
+		case 'c':
+			uniwill_cycle_power_mode();
+			// fall through
+		default:
+			return size;
+	}
+
+	__uw_ec_write_addr(0x51, 0x07, write, write, &reg_write_return);
+
+	return size;
+}
+
+
 // Device attributes used by uw kbd
 struct uw_kbd_dev_attrs_t {
 	struct device_attribute brightness;
 	struct device_attribute color_string;
+	struct device_attribute power_mode;
 } uw_kbd_dev_attrs = {
 	.brightness = __ATTR(brightness, 0644, uw_brightness_show, uw_brightness_store),
-	.color_string = __ATTR(color_string, 0644, uw_color_string_show, uw_color_string_store)
+	.color_string = __ATTR(color_string, 0644, uw_color_string_show, uw_color_string_store),
+	.power_mode = __ATTR(power_mode, 0644, uw_power_mode_show, uw_power_mode_store),
 };
 
 // Device attributes used for uw_kbd_bl_color
 static struct attribute *uw_kbd_bl_color_attrs[] = {
 	&uw_kbd_dev_attrs.brightness.attr,
 	&uw_kbd_dev_attrs.color_string.attr,
+	&uw_kbd_dev_attrs.power_mode.attr,
 	NULL
 };
 
@@ -490,7 +612,7 @@ static int uw_kbd_bl_init(struct platform_device *dev)
 	if (uniwill_kbd_bl_type_rgb_single_color) {
 		// Initialize keyboard backlight driver state according to parameters
 		if (param_brightness > UNIWILL_BRIGHTNESS_MAX) param_brightness = UNIWILL_BRIGHTNESS_DEFAULT;
-		kbd_led_state_uw.brightness = param_brightness;
+		kbd_led_state_uw.brightness = 0;
 		if (color_lookup(&color_list, param_color) <= (u32) 0xffffff) kbd_led_state_uw.color = color_lookup(&color_list, param_color);
 		else kbd_led_state_uw.color = UNIWILL_COLOR_DEFAULT;
 
@@ -504,7 +626,7 @@ static int uw_kbd_bl_init(struct platform_device *dev)
 	} else {
 		// For non-RGB versions
 		// Enable keyboard backlight immediately (should it be disabled)
-		uniwill_write_kbd_bl_enable(1);
+		uniwill_write_kbd_bl_enable(0);
 	}
 
 	return status;
