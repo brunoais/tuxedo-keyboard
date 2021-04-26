@@ -237,42 +237,89 @@ static void uniwill_write_kbd_bl_reset(void)
 	__uw_ec_write_addr(0x8c, 0x07, 0x10, 0x00, &reg_write_return);
 }
 
-static int uniwill_cycle_power_mode(void)
-{
 
+/**
+ * In hardware, the 2 bits for the power mode are (hardware or firmware) implemented as:
+ * 1st bit set? -> Power mode 2, 2 LED ON
+ * 2nd bit set? -> Power mode 0, 1 LED ON (bottom one)
+ * Otherwise -> power mode 1 LED ON
+ * I've tried only setting the 1st LED without setting the 2nd one.
+ * That lead to both LED being ON regardless of the 2nd bit.
+ * Maybe someone who like party with LED would like it moving in "super" power mode or something
+ * 
+ */
+u8 uniwill_get_power_mode(void)
+{
+	union uw_ec_read_return reg_read_return;
+	
+	__uw_ec_read_addr(0x51, 0x07, &reg_read_return);
+
+	// Only 3 LED status are available
+	switch(UNIWILL_POWER_MODE(reg_read_return.bytes.data_low)){
+		case UNIWILL_POWER_MODE_MIN:
+			return 0x00;
+			break;
+		case UNIWILL_POWER_MODE_MED:
+			return 0x01;
+			break;
+		case UNIWILL_POWER_MODE_MAX:
+			return 0x02;
+			break;
+		default:
+			TUXEDO_INFO("Unexpected mode for power mode (%0#6x) (%0#6x)\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low);
+			return 0xFF;
+	}
+}
+
+u8 uniwill_set_power_mode(u8 to)
+{
 	int write;
 	union uw_ec_read_return reg_read_return;
 	union uw_ec_write_return reg_write_return;
+
+	if(unlikely(to > 3)){
+		TUXEDO_ERROR("Unknown power mode %d\n", to);
+		return 255;
+	}
 
 	__uw_ec_read_addr(0x51, 0x07, &reg_read_return);
 
 	write = UNIWILL_POWER_MODE_UNSET(reg_read_return.bytes.data_low);
 	
-	switch(UNIWILL_POWER_MODE(reg_read_return.bytes.data_low)){
-		case UNIWILL_POWER_MODE_MIN:
-			TUXEDO_DEBUG("Power mode to medium\n");
-			break;
-		case UNIWILL_POWER_MODE_MED:
+	switch(to){
+		case 0x00:
 			TUXEDO_DEBUG("Power mode to min\n");
-			write |= UNIWILL_POWER_MODE_MAX;
-			break;
-		case UNIWILL_POWER_MODE_MAX:
-			TUXEDO_DEBUG("Power mode to max\n");
 			write |= UNIWILL_POWER_MODE_MIN;
 			break;
+		case 0x01:
+			TUXEDO_DEBUG("Power mode to medium\n");
+			break;
+		case 0x02:
+			TUXEDO_DEBUG("Power mode to max\n");
+			write |= UNIWILL_POWER_MODE_MAX;
+			break;
 		default:
-			TUXEDO_INFO("Unexpected mode for power mode (%0#6x) (%0#6x)\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low);
-			write |= UNIWILL_POWER_MODE_MED;
+			TUXEDO_ERROR("Unexpected mode for power mode %0#6x -> (%0#6x) (%0#6x)\n", to, 
+				reg_read_return.bytes.data_high, reg_read_return.bytes.data_low);
+			return 255;
 	}
 
 	TUXEDO_INFO("Writing new mode (%0#6x)(%0#6x) -> (%0#6x)(%0#6x)\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low, write, write);
 	__uw_ec_write_addr(0x51, 0x07, write, write, &reg_write_return);
 
-	return write;
-
+	return to;
 }
 
+int uniwill_cycle_power_mode(void)
+{
+	u8 power_mode = uniwill_get_power_mode();
+	if (power_mode < 0xf0) {
+		return uniwill_set_power_mode((power_mode + 1) % 3);
+	}
+	TUXEDO_ERROR("Error with power mode. Unexpected (%0#6x)\n", power_mode);
 
+	return power_mode;
+}
 
 
 static void uniwill_wmi_handle_event(u32 value, void *context, u32 guid_nr)
@@ -304,7 +351,7 @@ static void uniwill_wmi_handle_event(u32 value, void *context, u32 guid_nr)
 
 			// Special key combination when mode change key is pressed
 			if (code == 0xb0) {
-				TUXEDO_INFO("[Ev %d] Power mode pressed - %d\n", guid_nr, code, code);
+				TUXEDO_INFO("[Ev %d] Power mode pressed - %d (%0#6x)\n", guid_nr, code, code);
 
 				uniwill_cycle_power_mode();
 
@@ -425,59 +472,28 @@ static ssize_t uw_color_string_store(struct device *child,
 static ssize_t uw_power_mode_show(struct device *child,
 				 struct device_attribute *attr, char *buffer)
 {
-	union uw_ec_read_return reg_read_return;
-
-	__uw_ec_read_addr(0x51, 0x07, &reg_read_return);
-
-	switch(reg_read_return.bytes.data_low & 0x90){
-		case UNIWILL_POWER_MODE_MIN:
-			sprintf(buffer, "Power mode: low\n");
-			break;
-		case UNIWILL_POWER_MODE_MED:
-			sprintf(buffer, "Power mode: medium\n");
-			break;
-		case UNIWILL_POWER_MODE_MAX:
-			sprintf(buffer, "Power mode: max\n");
-			break;
-		default:
-			sprintf(buffer, "Power mode: unknown\n");
-	}
-	return strlen(buffer);
+	u8 mode = uniwill_get_power_mode();
+	return sprintf(buffer, "%d", mode);
 }
 
 static ssize_t uw_power_mode_store(struct device *child,
 				   struct device_attribute *attr,
 				   const char *buffer, size_t size)
 {
-	union uw_ec_write_return reg_write_return;
-	union uw_ec_read_return reg_read_return;
-	int write;
-
-	if(size > 2){
-		return size;
-	}
-
-	__uw_ec_read_addr(0x51, 0x07, &reg_read_return);
-	write = reg_read_return.bytes.data_low;
-	write &= 0x6F;
 
 	switch(buffer[0]){
 		case '0':
-			write |= UNIWILL_POWER_MODE_MIN;
+			uniwill_set_power_mode(0);
 			break;
 		case '1':
+			uniwill_set_power_mode(1);
 			break;
 		case '2':
-				write |= UNIWILL_POWER_MODE_MAX;
+			uniwill_set_power_mode(2);
 			break;
 		case 'c':
 			uniwill_cycle_power_mode();
-			// fall through
-		default:
-			return size;
 	}
-
-	__uw_ec_write_addr(0x51, 0x07, write, write, &reg_write_return);
 
 	return size;
 }
