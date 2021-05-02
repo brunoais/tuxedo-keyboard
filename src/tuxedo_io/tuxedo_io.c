@@ -16,6 +16,8 @@
  * You should have received a copy of the GNU General Public License
  * along with this software.  If not, see <https://www.gnu.org/licenses/>.
  */
+
+
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/kernel.h>
 #include <linux/module.h>
@@ -26,6 +28,7 @@
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/delay.h>
+#include <linux/syscalls.h>
 #include "../clevo_interfaces.h"
 #include "tongfang_wmi.h"
 #include "tuxedo_io_ioctl.h"
@@ -273,6 +276,136 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 	return 0;
 }
 
+
+struct event_stream_t
+{
+	s32 last_event;
+	struct mutex lock;
+};
+
+struct event_stream_t event_streams[10] = {{0}};
+
+void inject_event(int num){
+	event_streams[0].last_event = '0' + num;
+	pr_info("Got power %d", event_streams[0].last_event);
+}
+EXPORT_SYMBOL(inject_event);
+
+static int open_for_events(struct inode *inode, struct file *file)
+{
+	event_stream_t *event_s = &event_streams[0];
+
+    file->private_data = event_s
+
+	pr_info("Opening!");
+
+    return 0;
+}
+
+static ssize_t read_events(struct file *file, char __user *user_buffer, size_t size, loff_t *offset)
+{
+	ssize_t len;
+    struct event_stream_t *event_stream = (struct event_stream_t *) file->private_data;
+    // ssize_t len = min(my_data->size - *offset, size);
+
+	int ssize = 0;
+	if(event_stream->last_event){
+		ssize = 2;
+	}
+    len = ssize;
+
+	pr_info("len to write: %ld", len);
+
+    if (len <= 1){
+        return 0;
+	}
+	
+	
+	{
+		char response[2];
+		response[0] = event_stream->last_event;
+		response[1] = '\0';
+		len = 2; // prevent crash
+
+		/* read data from my_data->buffer to user buffer */
+		// if (copy_to_user(user_buffer, my_data->buffer + *offset, len))
+		// 	return -EFAULT;
+
+		pr_info("Copying to user: %c", response[0]);
+
+		if (copy_to_user(user_buffer, response, len))
+			return -EFAULT;
+		
+		event_stream->last_event = 0;
+
+		*offset += len;
+		return len;
+
+	}
+
+}
+
+static int closed_for_events(struct inode *inode, struct file *file)
+{
+	pr_info("Closing");
+    // remove and clean buffer
+	return 0;
+}
+
+
+
+static struct file_operations fops_dev_2 = {
+	.owner              = THIS_MODULE,
+//	.unlocked_ioctl     = fop_ioctl
+    .open               = open_for_events,
+    .read               = read_events,
+    .release            = closed_for_events
+};
+
+struct class *tuxedo_io_device_class_2;
+dev_t tuxedo_io_device_handle_2;
+static struct device *dev_2;
+
+static struct cdev tuxedo_io_cdev_2;
+
+
+static int create_events_file(void){
+
+	int err;
+
+	err = alloc_chrdev_region(&tuxedo_io_device_handle_2, 0, 1, "tuxedo_io_cdev_2");
+	if (err != 0) {
+		pr_err("Failed to allocate chrdev region\n");
+		return err;
+	}
+	cdev_init(&tuxedo_io_cdev_2, &fops_dev_2);
+	err = (cdev_add(&tuxedo_io_cdev_2, tuxedo_io_device_handle_2, 1));
+	if (err < 0) {
+		pr_err("Failed to add cdev\n");
+		unregister_chrdev_region(tuxedo_io_device_handle_2, 1);
+	}
+	tuxedo_io_device_class_2 = class_create(THIS_MODULE, "tuxedo_io_events");
+	// dev = device_create(tuxedo_io_device_class_2, NULL, tuxedo_io_device_handle_2, NULL, "tuxedo_io_events");
+	dev_2 = device_create(tuxedo_io_device_class_2, NULL, tuxedo_io_device_handle_2, NULL, "tuxedo!tuxedo_io_events");
+
+	return 0;
+
+
+}
+
+static void __exit remove_events_file(void)
+{
+	device_destroy(tuxedo_io_device_class_2, tuxedo_io_device_handle_2);
+	class_destroy(tuxedo_io_device_class_2);
+	cdev_del(&tuxedo_io_cdev_2);
+	unregister_chrdev_region(tuxedo_io_device_handle_2, 1);
+	pr_debug("Module events exit\n");
+}
+
+
+
+
+
 static long fop_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
 	u32 status;
@@ -311,8 +444,10 @@ static struct file_operations fops_dev = {
 
 struct class *tuxedo_io_device_class;
 dev_t tuxedo_io_device_handle;
+static struct device *dev;
 
 static struct cdev tuxedo_io_cdev;
+
 
 static int __init tuxedo_io_init(void)
 {
@@ -344,17 +479,26 @@ static int __init tuxedo_io_init(void)
 		unregister_chrdev_region(tuxedo_io_device_handle, 1);
 	}
 	tuxedo_io_device_class = class_create(THIS_MODULE, "tuxedo_io");
-	device_create(tuxedo_io_device_class, NULL, tuxedo_io_device_handle, NULL, "tuxedo_io");
+	dev = device_create(tuxedo_io_device_class, NULL, tuxedo_io_device_handle, NULL, "tuxedo_io");
+	// dev = device_create(tuxedo_io_device_class, NULL, tuxedo_io_device_handle, NULL, "tuxedo!tuxedo_io");
+
+	create_events_file();
 	pr_debug("Module init successful\n");
-	
+
 	return 0;
 }
 
+
+
+
 static void __exit tuxedo_io_exit(void)
 {
+	remove_events_file();
+
 	if (id_check_uniwill == 1) {
 		uniwill_exit();
 	}
+	sysfs_remove_link(&tuxedo_io_cdev.kobj, "tuxedo_io");
 
 	device_destroy(tuxedo_io_device_class, tuxedo_io_device_handle);
 	class_destroy(tuxedo_io_device_class);

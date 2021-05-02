@@ -245,7 +245,6 @@ static void uniwill_write_kbd_bl_reset(void)
  * Otherwise -> power mode 1 LED ON
  * I've tried only setting the 1st LED without setting the 2nd one.
  * That lead to both LED being ON regardless of the 2nd bit.
- * Maybe someone who like party with LED would like it moving in "super" power mode or something
  * 
  */
 u8 uniwill_get_power_mode(void)
@@ -271,6 +270,22 @@ u8 uniwill_get_power_mode(void)
 	}
 }
 
+typedef void (inject_event_func)(int);
+
+extern inject_event_func inject_event;
+
+void warn_power_mode_update(int i){
+	inject_event_func * injecting = symbol_get(inject_event);
+
+	pr_info("power updating %p", injecting);
+	if(injecting){
+		injecting(i);
+		pr_info("power updated %p", injecting);
+		symbol_put(inject_event);
+	}
+	
+}
+
 u8 uniwill_set_power_mode(u8 to)
 {
 	int write;
@@ -290,13 +305,16 @@ u8 uniwill_set_power_mode(u8 to)
 		case 0x00:
 			TUXEDO_DEBUG("Power mode to min\n");
 			write |= UNIWILL_POWER_MODE_MIN;
+			warn_power_mode_update(0);
 			break;
 		case 0x01:
 			TUXEDO_DEBUG("Power mode to medium\n");
+			warn_power_mode_update(1);
 			break;
 		case 0x02:
 			TUXEDO_DEBUG("Power mode to max\n");
 			write |= UNIWILL_POWER_MODE_MAX;
+			warn_power_mode_update(2);
 			break;
 		default:
 			TUXEDO_ERROR("Unexpected mode for power mode %0#6x -> (%0#6x) (%0#6x)\n", to, 
@@ -331,27 +349,23 @@ static void uniwill_wmi_handle_event(u32 value, void *context, u32 guid_nr)
 	int code;
 
 	status = wmi_get_event_data(value, &response);
-	TUXEDO_INFO("[Ev %d] got status - %d\n", guid_nr, status);
 	if (status != AE_OK) {
 		TUXEDO_ERROR("uniwill handle event -> bad event status\n");
 		return;
 	}
-	TUXEDO_INFO("[Ev %d] got status OK - %d\n", guid_nr, status);
 
 	obj = (union acpi_object *) response.pointer;
 	if (obj) {
-		TUXEDO_INFO("[Ev %d] Have pointer - %d; type:%d\n", guid_nr, status, obj->type);
 		if (obj->type == ACPI_TYPE_INTEGER) {
 			code = obj->integer.value;
-			TUXEDO_INFO("[Ev %d] Have pointer - %d; type:%d code:  %d (%0#6x)\n", guid_nr, status, obj->type, code, code);
+			TUXEDO_DEBUG("[Ev %d] Event received - %d; type: %d, code: %d (%0#6x)\n", guid_nr, status, obj->type, code, code);
 			if (!sparse_keymap_report_known_event(uniwill_keyboard_driver.input_device, code, 1, true)) {
 				TUXEDO_DEBUG("[Ev %d] Unknown key - %d (%0#6x)\n", guid_nr, code, code);
 			}
 
-
 			// Special key combination when mode change key is pressed
 			if (code == 0xb0) {
-				TUXEDO_INFO("[Ev %d] Power mode pressed - %d (%0#6x)\n", guid_nr, code, code);
+				TUXEDO_INFO("[Ev %d] Power mode pressed\n", guid_nr);
 
 				uniwill_cycle_power_mode();
 
@@ -469,52 +483,19 @@ static ssize_t uw_color_string_store(struct device *child,
 }
 
 
-static ssize_t uw_power_mode_show(struct device *child,
-				 struct device_attribute *attr, char *buffer)
-{
-	u8 mode = uniwill_get_power_mode();
-	return sprintf(buffer, "%d", mode);
-}
-
-static ssize_t uw_power_mode_store(struct device *child,
-				   struct device_attribute *attr,
-				   const char *buffer, size_t size)
-{
-
-	switch(buffer[0]){
-		case '0':
-			uniwill_set_power_mode(0);
-			break;
-		case '1':
-			uniwill_set_power_mode(1);
-			break;
-		case '2':
-			uniwill_set_power_mode(2);
-			break;
-		case 'c':
-			uniwill_cycle_power_mode();
-	}
-
-	return size;
-}
-
-
 // Device attributes used by uw kbd
 struct uw_kbd_dev_attrs_t {
 	struct device_attribute brightness;
 	struct device_attribute color_string;
-	struct device_attribute power_mode;
 } uw_kbd_dev_attrs = {
 	.brightness = __ATTR(brightness, 0644, uw_brightness_show, uw_brightness_store),
-	.color_string = __ATTR(color_string, 0644, uw_color_string_show, uw_color_string_store),
-	.power_mode = __ATTR(power_mode, 0644, uw_power_mode_show, uw_power_mode_store),
+	.color_string = __ATTR(color_string, 0644, uw_color_string_show, uw_color_string_store)
 };
 
 // Device attributes used for uw_kbd_bl_color
 static struct attribute *uw_kbd_bl_color_attrs[] = {
 	&uw_kbd_dev_attrs.brightness.attr,
 	&uw_kbd_dev_attrs.color_string.attr,
-	&uw_kbd_dev_attrs.power_mode.attr,
 	NULL
 };
 
@@ -644,6 +625,101 @@ static int uw_kbd_bl_init(struct platform_device *dev)
 		// Enable keyboard backlight immediately (should it be disabled)
 		uniwill_write_kbd_bl_enable(0);
 	}
+
+	return status;
+}
+
+
+
+static ssize_t uw_list_power_modes(struct device *child,
+				 struct device_attribute *attr, char *buffer)
+{
+	return sprintf(buffer, "%d\n%d\n%d\n", 0, 1, 2);
+}
+
+static ssize_t uw_power_mode_show(struct device *child,
+				 struct device_attribute *attr, char *buffer)
+{
+	u8 mode = uniwill_get_power_mode();
+	return sprintf(buffer, "%d", mode);
+}
+
+static ssize_t uw_power_mode_store(struct device *child,
+				   struct device_attribute *attr,
+				   const char *buffer, size_t size)
+{
+
+	switch(buffer[0]){
+		case '0':
+			uniwill_set_power_mode(0);
+			break;
+		case '1':
+			uniwill_set_power_mode(1);
+			break;
+		case '2':
+			uniwill_set_power_mode(2);
+			break;
+		case 'c':
+			uniwill_cycle_power_mode();
+	}
+
+	return size;
+}
+
+
+// Device attributes used by uw kbd
+struct uw_power_mode_dev_attrs_t {
+	struct device_attribute available_power_modes;
+	struct device_attribute power_mode;
+} uw_power_mode_dev_attrs = {
+	.available_power_modes = __ATTR(available_power_modes, 0444, uw_list_power_modes, NULL),
+	.power_mode = __ATTR(power_mode, 0644, uw_power_mode_show, uw_power_mode_store)
+};
+
+// Device attributes used for uw_kbd_bl_color
+static struct attribute *uw_power_mode_attrs[] = {
+	&uw_power_mode_dev_attrs.available_power_modes.attr,
+	&uw_power_mode_dev_attrs.power_mode.attr,
+	NULL
+};
+
+static struct attribute_group uw_power_mode_attr_group = {
+	.name = "uw_power_mode_color",
+	.attrs = uw_power_mode_attrs
+};
+
+static int uw_power_mode_init(struct platform_device *dev)
+{
+	int status = 0;
+	int uniwill_has_power_mode = false
+		// New names
+		| dmi_match(DMI_BOARD_NAME, "POLARIS1501A1650TI")
+		| dmi_match(DMI_BOARD_NAME, "POLARIS1501A2060")
+		| dmi_match(DMI_BOARD_NAME, "POLARIS1501I1650TI")
+		| dmi_match(DMI_BOARD_NAME, "POLARIS1501I2060")
+		| dmi_match(DMI_BOARD_NAME, "POLARIS1701A1650TI")
+		| dmi_match(DMI_BOARD_NAME, "POLARIS1701A2060")
+		| dmi_match(DMI_BOARD_NAME, "POLARIS1701I1650TI")
+		| dmi_match(DMI_BOARD_NAME, "POLARIS1701I2060")
+
+		// Old names
+		// | dmi_match(DMI_BOARD_NAME, "Polaris15I01")
+		// | dmi_match(DMI_BOARD_NAME, "Polaris17I01")
+		// | dmi_match(DMI_BOARD_NAME, "Polaris15A01")
+		// | dmi_match(DMI_BOARD_NAME, "Polaris1501I2060")
+		// | dmi_match(DMI_BOARD_NAME, "Polaris1701I2060")
+		;
+
+
+	if (!uniwill_has_power_mode) {
+		TUXEDO_INFO("PC without power mode");
+		return 127;
+	}
+
+	// Init sysfs power mode attributes group
+	status = sysfs_create_group(&dev->dev.kobj, &uw_power_mode_attr_group);
+	if (status) TUXEDO_ERROR("Failed to create sysfs power mode group\n");
+
 
 	return status;
 }
@@ -928,6 +1004,7 @@ static int uniwill_keyboard_probe(struct platform_device *dev)
 	status = register_keyboard_notifier(&keyboard_notifier_block);
 
 	uw_kbd_bl_init(dev);
+	uw_power_mode_init(dev);
 
 	status = uw_lightbar_init(dev);
 	uw_lightbar_loaded = (status >= 0);
