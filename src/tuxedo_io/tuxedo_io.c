@@ -280,22 +280,31 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 struct event_stream_t
 {
 	s32 last_event;
-	struct mutex lock;
+	wait_queue_head_t lock;
+	int last_event_updated;
 };
+
 
 struct event_stream_t event_streams[10] = {{0}};
 
 void inject_event(int num){
 	event_streams[0].last_event = '0' + num;
 	pr_info("Got power %d", event_streams[0].last_event);
+
+	event_streams[0].last_event_updated = true;
+
+	wake_up(&event_streams[0].lock);
+
 }
 EXPORT_SYMBOL(inject_event);
 
 static int open_for_events(struct inode *inode, struct file *file)
 {
-	event_stream_t *event_s = &event_streams[0];
+	struct event_stream_t *event_stream = &event_streams[0];
+	init_waitqueue_head(&event_stream->lock);
+	event_stream->last_event_updated = false;
 
-    file->private_data = event_s
+    file->private_data = event_stream;
 
 	pr_info("Opening!");
 
@@ -307,8 +316,15 @@ static ssize_t read_events(struct file *file, char __user *user_buffer, size_t s
 	ssize_t len;
     struct event_stream_t *event_stream = (struct event_stream_t *) file->private_data;
     // ssize_t len = min(my_data->size - *offset, size);
-
 	int ssize = 0;
+
+	if(!event_stream->last_event){
+		pr_info("Nap time");
+		wait_event_interruptible(event_stream->lock, event_stream->last_event_updated != 0);
+
+		pr_info("wake up!");
+	}
+	
 	if(event_stream->last_event){
 		ssize = 2;
 	}
@@ -337,6 +353,7 @@ static ssize_t read_events(struct file *file, char __user *user_buffer, size_t s
 			return -EFAULT;
 		
 		event_stream->last_event = 0;
+		event_stream->last_event_updated = false;
 
 		*offset += len;
 		return len;
