@@ -25,6 +25,7 @@
 #include <linux/device.h>
 #include <linux/ioctl.h>
 #include <linux/fs.h>
+#include <linux/kfifo.h>
 #include <linux/cdev.h>
 #include <linux/uaccess.h>
 #include <linux/delay.h>
@@ -52,6 +53,10 @@ static u32 clevo_identify(void)
 {
 	return clevo_get_active_interface_id(NULL) == 0 ? 1 : 0;
 }
+
+typedef void (uniwill_set_power_mode_func)(u8);
+extern uniwill_set_power_mode_func uniwill_set_power_mode;
+
 
 /*static int fop_open(struct inode *inode, struct file *file)
 {
@@ -238,11 +243,7 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 			break;
 		case W_UW_POWER_MODE:
 			copy_result = copy_from_user(&argument, (int32_t *) arg, sizeof(argument));
-			uw_ec_read_addr(0x51, 0x07, &reg_read_return);
-			result = reg_read_return.bytes.data_low;
-			argument &= 0x90;
-			argument |= result & (~ 0x90);
-			uw_ec_write_addr(0x51, 0x07, argument & 0xff, 0x00, &reg_write_return);
+			uniwill_set_power_mode((u8) argument);
 			break;
 		case W_UW_MODE_ENABLE:
 			// Note: Is for the moment set and cleared on init/exit of module (uniwill mode)
@@ -279,32 +280,52 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 
 struct event_stream_t
 {
-	s32 last_event;
+	DECLARE_KFIFO(event_queue, char, (1 << 10));
 	wait_queue_head_t lock;
-	int last_event_updated;
+	struct list_head next_prev_stream;
 };
 
+LIST_HEAD(event_streams);
 
-struct event_stream_t event_streams[10] = {{0}};
 
-void inject_event(int num){
-	event_streams[0].last_event = '0' + num;
-	pr_info("Got power %d", event_streams[0].last_event);
+void io_announce_event(char event, char msg){
 
-	event_streams[0].last_event_updated = true;
+	struct event_stream_t *event_stream;
+	list_for_each_entry ( event_stream , &event_streams, next_prev_stream ) 
+    { 
 
-	wake_up(&event_streams[0].lock);
+		if (kfifo_avail(&event_stream->event_queue) > 5) {
+			// This format allows future proofing for more flexibility towards potential longer data in the future
+
+			kfifo_put(&event_stream->event_queue, '\2');
+			kfifo_put(&event_stream->event_queue, event);
+			kfifo_put(&event_stream->event_queue, '\36');
+			kfifo_put(&event_stream->event_queue, msg);
+			kfifo_put(&event_stream->event_queue, '\3');
+		}
+		else {
+			// Warn the reader that the
+			kfifo_put(&event_stream->event_queue, '\177');
+		}
+
+		wake_up(&event_stream->lock);
+    }
 
 }
-EXPORT_SYMBOL(inject_event);
+EXPORT_SYMBOL(io_announce_event);
 
 static int open_for_events(struct inode *inode, struct file *file)
 {
-	struct event_stream_t *event_stream = &event_streams[0];
+	struct event_stream_t *event_stream = vmalloc(sizeof(struct event_stream_t));
+	if(!event_stream){
+		return -ENOMEM;
+	}
 	init_waitqueue_head(&event_stream->lock);
-	event_stream->last_event_updated = false;
+	INIT_KFIFO(event_stream->event_queue);
 
     file->private_data = event_stream;
+
+	list_add_tail(&event_stream->next_prev_stream, &event_streams);
 
 	pr_info("Opening!");
 
@@ -313,59 +334,33 @@ static int open_for_events(struct inode *inode, struct file *file)
 
 static ssize_t read_events(struct file *file, char __user *user_buffer, size_t size, loff_t *offset)
 {
-	ssize_t len;
     struct event_stream_t *event_stream = (struct event_stream_t *) file->private_data;
     // ssize_t len = min(my_data->size - *offset, size);
-	int ssize = 0;
+	int copied_size = 0;
 
-	if(!event_stream->last_event){
-		pr_info("Nap time");
-		wait_event_interruptible(event_stream->lock, event_stream->last_event_updated != 0);
+	if(wait_event_interruptible(event_stream->lock, !kfifo_is_empty(&event_stream->event_queue))){
+		return -EINTR;
+	}
 
-		pr_info("wake up!");
+	if (size < 1) {
+		return 0;
 	}
 	
-	if(event_stream->last_event){
-		ssize = 2;
-	}
-    len = ssize;
+	kfifo_to_user(&event_stream->event_queue, user_buffer, size, &copied_size);
 
-	pr_info("len to write: %ld", len);
-
-    if (len <= 1){
-        return 0;
-	}
-	
-	
-	{
-		char response[2];
-		response[0] = event_stream->last_event;
-		response[1] = '\0';
-		len = 2; // prevent crash
-
-		/* read data from my_data->buffer to user buffer */
-		// if (copy_to_user(user_buffer, my_data->buffer + *offset, len))
-		// 	return -EFAULT;
-
-		pr_info("Copying to user: %c", response[0]);
-
-		if (copy_to_user(user_buffer, response, len))
-			return -EFAULT;
-		
-		event_stream->last_event = 0;
-		event_stream->last_event_updated = false;
-
-		*offset += len;
-		return len;
-
-	}
+	*offset += copied_size;
+	return copied_size;
 
 }
 
 static int closed_for_events(struct inode *inode, struct file *file)
 {
+    struct event_stream_t *event_stream = (struct event_stream_t *) file->private_data;
+
+	list_del(&event_stream->next_prev_stream);
+	vfree(event_stream);
+	
 	pr_info("Closing");
-    // remove and clean buffer
 	return 0;
 }
 

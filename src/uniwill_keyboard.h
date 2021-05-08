@@ -269,21 +269,23 @@ u8 uniwill_get_power_mode(void)
 			return 0xFF;
 	}
 }
+EXPORT_SYMBOL(uniwill_get_power_mode);
 
-typedef void (inject_event_func)(int);
 
-extern inject_event_func inject_event;
+typedef void (io_announce_event_func)(char, u8);
+extern io_announce_event_func io_announce_event;
 
-void warn_power_mode_update(int i){
-	inject_event_func * injecting = symbol_get(inject_event);
+static int uniwill_warn_power_mode_update(int i){
+	io_announce_event_func * announcing = symbol_get(io_announce_event);
 
-	pr_info("power updating %p", injecting);
-	if(injecting){
-		injecting(i);
-		pr_info("power updated %p", injecting);
-		symbol_put(inject_event);
+	pr_info("power updating %p", announcing);
+	if(announcing){
+		announcing(UNIWILL_POWER_MODE_EVENT, '0' + i);
+		pr_info("power updated %p", announcing);
+		symbol_put(io_announce_event);
+		return 1;
 	}
-	
+	return 0;
 }
 
 u8 uniwill_set_power_mode(u8 to)
@@ -305,16 +307,16 @@ u8 uniwill_set_power_mode(u8 to)
 		case 0x00:
 			TUXEDO_DEBUG("Power mode to min\n");
 			write |= UNIWILL_POWER_MODE_MIN;
-			warn_power_mode_update(0);
+			uniwill_warn_power_mode_update(0);
 			break;
 		case 0x01:
 			TUXEDO_DEBUG("Power mode to medium\n");
-			warn_power_mode_update(1);
+			uniwill_warn_power_mode_update(1);
 			break;
 		case 0x02:
 			TUXEDO_DEBUG("Power mode to max\n");
 			write |= UNIWILL_POWER_MODE_MAX;
-			warn_power_mode_update(2);
+			uniwill_warn_power_mode_update(2);
 			break;
 		default:
 			TUXEDO_ERROR("Unexpected mode for power mode %0#6x -> (%0#6x) (%0#6x)\n", to, 
@@ -327,6 +329,8 @@ u8 uniwill_set_power_mode(u8 to)
 
 	return to;
 }
+EXPORT_SYMBOL(uniwill_set_power_mode);
+
 
 int uniwill_cycle_power_mode(void)
 {
@@ -338,6 +342,7 @@ int uniwill_cycle_power_mode(void)
 
 	return power_mode;
 }
+EXPORT_SYMBOL(uniwill_cycle_power_mode);
 
 
 static void uniwill_wmi_handle_event(u32 value, void *context, u32 guid_nr)
