@@ -380,8 +380,7 @@ static int closed_for_events(struct inode *inode, struct file *file)
 }
 
 
-
-static struct file_operations fops_dev_2 = {
+static struct file_operations fops_dev_evt = {
 	.owner              = THIS_MODULE,
 //	.unlocked_ioctl     = fop_ioctl
     .open               = open_for_events,
@@ -389,31 +388,30 @@ static struct file_operations fops_dev_2 = {
     .release            = closed_for_events
 };
 
-struct class *tuxedo_io_device_class_2;
-dev_t tuxedo_io_device_handle_2;
-static struct device *dev_2;
+struct class *tuxedo_io_device_class_evt;
+dev_t tuxedo_io_device_handle_evt;
+static struct device *dev_evt;
 
-static struct cdev tuxedo_io_cdev_2;
+static struct cdev tuxedo_io_cdev_evt;
 
 
 static int create_events_file(void){
 
 	int err;
 
-	err = alloc_chrdev_region(&tuxedo_io_device_handle_2, 0, 1, "tuxedo_io_cdev_2");
+	err = alloc_chrdev_region(&tuxedo_io_device_handle_evt, 0, 1, "tuxedo_io_cdev_evt");
 	if (err != 0) {
 		pr_err("Failed to allocate chrdev region\n");
 		return err;
 	}
-	cdev_init(&tuxedo_io_cdev_2, &fops_dev_2);
-	err = (cdev_add(&tuxedo_io_cdev_2, tuxedo_io_device_handle_2, 1));
+	cdev_init(&tuxedo_io_cdev_evt, &fops_dev_evt);
+	err = (cdev_add(&tuxedo_io_cdev_evt, tuxedo_io_device_handle_evt, 1));
 	if (err < 0) {
 		pr_err("Failed to add cdev\n");
-		unregister_chrdev_region(tuxedo_io_device_handle_2, 1);
+		unregister_chrdev_region(tuxedo_io_device_handle_evt, 1);
 	}
-	tuxedo_io_device_class_2 = class_create(THIS_MODULE, "tuxedo_io_events");
-	// dev = device_create(tuxedo_io_device_class_2, NULL, tuxedo_io_device_handle_2, NULL, "tuxedo_io_events");
-	dev_2 = device_create(tuxedo_io_device_class_2, NULL, tuxedo_io_device_handle_2, NULL, "tuxedo!tuxedo_io_events");
+	tuxedo_io_device_class_evt = class_create(THIS_MODULE, "tuxedo_io_events");
+	dev_evt = device_create(tuxedo_io_device_class_evt, NULL, tuxedo_io_device_handle_evt, NULL, "tuxedo!user_events");
 
 	return 0;
 
@@ -422,10 +420,10 @@ static int create_events_file(void){
 
 static void __exit remove_events_file(void)
 {
-	device_destroy(tuxedo_io_device_class_2, tuxedo_io_device_handle_2);
-	class_destroy(tuxedo_io_device_class_2);
-	cdev_del(&tuxedo_io_cdev_2);
-	unregister_chrdev_region(tuxedo_io_device_handle_2, 1);
+	device_destroy(tuxedo_io_device_class_evt, tuxedo_io_device_handle_evt);
+	class_destroy(tuxedo_io_device_class_evt);
+	cdev_del(&tuxedo_io_cdev_evt);
+	unregister_chrdev_region(tuxedo_io_device_handle_evt, 1);
 	pr_debug("Module events exit\n");
 }
 
