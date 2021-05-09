@@ -281,6 +281,8 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 struct event_stream_t
 {
 	DECLARE_KFIFO(event_queue, char, (1 << 10));
+	spinlock_t kfifo_lock;
+
 	wait_queue_head_t lock;
 	struct list_head next_prev_stream;
 };
@@ -292,21 +294,28 @@ void io_announce_event(char event, char msg){
 
 	struct event_stream_t *event_stream;
 	list_for_each_entry ( event_stream , &event_streams, next_prev_stream ) 
-    { 
-
-		if (kfifo_avail(&event_stream->event_queue) > 5) {
-			// This format allows future proofing for more flexibility towards potential longer data in the future
-
-			kfifo_put(&event_stream->event_queue, '\2');
-			kfifo_put(&event_stream->event_queue, event);
-			kfifo_put(&event_stream->event_queue, '\36');
-			kfifo_put(&event_stream->event_queue, msg);
-			kfifo_put(&event_stream->event_queue, '\3');
-		}
-		else {
-			// Warn the reader that the
+    {
+		if (kfifo_avail(&event_stream->event_queue) < 5) {
+			
+			unsigned long _flags;
+			spin_lock_irqsave(&event_stream->kfifo_lock, _flags);
+			while (kfifo_avail(&event_stream->event_queue) < 6)
+			{
+				kfifo_skip(&event_stream->event_queue);
+			}
+			spin_unlock_irqrestore(&event_stream->kfifo_lock, _flags);
+			// Warn the reader that he lost events and may need to update itself using ioctl calls
 			kfifo_put(&event_stream->event_queue, '\177');
+
 		}
+
+		// This format allows future proofing for more flexibility towards potential longer data in the future
+
+		kfifo_put(&event_stream->event_queue, '\2');
+		kfifo_put(&event_stream->event_queue, event);
+		kfifo_put(&event_stream->event_queue, '\36');
+		kfifo_put(&event_stream->event_queue, msg);
+		kfifo_put(&event_stream->event_queue, '\3');
 
 		wake_up(&event_stream->lock);
     }
@@ -322,6 +331,7 @@ static int open_for_events(struct inode *inode, struct file *file)
 	}
 	init_waitqueue_head(&event_stream->lock);
 	INIT_KFIFO(event_stream->event_queue);
+	spin_lock_init(&event_stream->kfifo_lock);
 
     file->private_data = event_stream;
 
@@ -345,12 +355,17 @@ static ssize_t read_events(struct file *file, char __user *user_buffer, size_t s
 	if (size < 1) {
 		return 0;
 	}
-	
-	kfifo_to_user(&event_stream->event_queue, user_buffer, size, &copied_size);
+
+	// Locking here should be impossible. If this locks, it's for the storing process above
+	{
+		unsigned long _flags;
+		spin_lock_irqsave(&event_stream->kfifo_lock, _flags);
+		kfifo_to_user(&event_stream->event_queue, user_buffer, size, &copied_size);
+		spin_unlock_irqrestore(&event_stream->kfifo_lock, _flags);
+	}
 
 	*offset += copied_size;
 	return copied_size;
-
 }
 
 static int closed_for_events(struct inode *inode, struct file *file)
