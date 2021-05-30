@@ -19,17 +19,19 @@
 
 
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-#include <linux/kernel.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/device.h>
-#include <linux/ioctl.h>
-#include <linux/fs.h>
-#include <linux/kfifo.h>
 #include <linux/cdev.h>
-#include <linux/uaccess.h>
 #include <linux/delay.h>
+#include <linux/device.h>
+#include <linux/fs.h>
+#include <linux/init.h>
+#include <linux/ioctl.h>
+#include <linux/kernel.h>
+#include <linux/kfifo.h>
+#include <linux/miscdevice.h>
+#include <linux/module.h>
 #include <linux/syscalls.h>
+#include <linux/uaccess.h>
+
 #include "../clevo_interfaces.h"
 #include "tongfang_wmi.h"
 #include "tuxedo_io_ioctl.h"
