@@ -61,7 +61,8 @@
 #define UNIWILL_POWER_MODE_MASK 0x90
 #define UNIWILL_POWER_MODE_MIN 0x80
 #define UNIWILL_POWER_MODE_MED 0x00
-#define UNIWILL_POWER_MODE_MAX 0x10
+#define UNIWILL_POWER_MODE_MAX 0x90
+#define UNIWILL_POWER_MODE_MAX_ALT 0x10
 #define UNIWILL_POWER_MODE_UNSET(var) (var) & ( ~ UNIWILL_POWER_MODE_MASK)
 #define UNIWILL_POWER_MODE(var) (var) & UNIWILL_POWER_MODE_MASK
 
@@ -262,6 +263,7 @@ u8 uniwill_get_power_mode(void)
 			return 0x01;
 			break;
 		case UNIWILL_POWER_MODE_MAX:
+		case UNIWILL_POWER_MODE_MAX_ALT:
 			return 0x02;
 			break;
 		default:
