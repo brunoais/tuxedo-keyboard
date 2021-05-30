@@ -390,31 +390,25 @@ static struct file_operations fops_dev_evt = {
     .release            = closed_for_events
 };
 
-struct class *tuxedo_io_device_class_evt;
-dev_t tuxedo_io_device_handle_evt;
-static struct device *dev_evt;
 
-static struct cdev tuxedo_io_cdev_evt;
+static struct miscdevice user_events_device = {
+    .minor  = MISC_DYNAMIC_MINOR,
+    .name   = "tuxedo!user_events",
+    .fops   = &fops_dev_evt,
+    .mode   = 0644,
+};
+
 
 
 static int create_events_file(void){
 
 	int err;
 
-	err = alloc_chrdev_region(&tuxedo_io_device_handle_evt, 0, 1, "tuxedo_io_cdev_evt");
+	err = misc_register(&user_events_device);
 	if (err != 0) {
-		pr_err("Failed to allocate chrdev region\n");
+		pr_err("Failed to allocate user_events\n");
 		return err;
 	}
-	cdev_init(&tuxedo_io_cdev_evt, &fops_dev_evt);
-	err = (cdev_add(&tuxedo_io_cdev_evt, tuxedo_io_device_handle_evt, 1));
-	if (err < 0) {
-		pr_err("Failed to add cdev\n");
-		unregister_chrdev_region(tuxedo_io_device_handle_evt, 1);
-	}
-	tuxedo_io_device_class_evt = class_create(THIS_MODULE, "tuxedo_io_events");
-	dev_evt = device_create(tuxedo_io_device_class_evt, NULL, tuxedo_io_device_handle_evt, NULL, "tuxedo!user_events");
-
 	return 0;
 
 
@@ -422,10 +416,7 @@ static int create_events_file(void){
 
 static void __exit remove_events_file(void)
 {
-	device_destroy(tuxedo_io_device_class_evt, tuxedo_io_device_handle_evt);
-	class_destroy(tuxedo_io_device_class_evt);
-	cdev_del(&tuxedo_io_cdev_evt);
-	unregister_chrdev_region(tuxedo_io_device_handle_evt, 1);
+	misc_deregister(&user_events_device);
 	pr_debug("Module events exit\n");
 }
 
