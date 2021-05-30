@@ -683,7 +683,7 @@ struct uw_power_mode_dev_attrs_t {
 	.power_mode = __ATTR(power_mode, 0644, uw_power_mode_show, uw_power_mode_store)
 };
 
-// Device attributes used for uw_kbd_bl_color
+// Device attributes used for uw_power_mode
 static struct attribute *uw_power_mode_attrs[] = {
 	&uw_power_mode_dev_attrs.available_power_modes.attr,
 	&uw_power_mode_dev_attrs.power_mode.attr,
@@ -691,7 +691,7 @@ static struct attribute *uw_power_mode_attrs[] = {
 };
 
 static struct attribute_group uw_power_mode_attr_group = {
-	.name = "uw_power_mode_color",
+	.name = "uw_power_mode",
 	.attrs = uw_power_mode_attrs
 };
 
