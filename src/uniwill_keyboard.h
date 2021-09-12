@@ -252,9 +252,10 @@ static void uniwill_write_kbd_bl_reset(void)
  * In hardware, the 2 bits for the power mode are (hardware or firmware) implemented as:
  * 1st bit set? -> Power mode 2, 2 LED ON
  * 2nd bit set? -> Power mode 0, 1 LED ON (bottom one)
- * Otherwise -> power mode 1 LED ON
+ * Otherwise -> power mode 1, 0 LED ON
  * I've tried only setting the 1st LED without setting the 2nd one.
  * That lead to both LED being ON regardless of the 2nd bit.
+ * Tested on Tuxedo Polaris Gen1
  * 
  */
 u8 uniwill_get_power_mode(void)
@@ -371,16 +372,6 @@ static void uniwill_wmi_handle_event(u32 value, void *context, u32 guid_nr)
 				TUXEDO_INFO("[Ev %d] Power mode pressed\n", guid_nr);
 
 				uniwill_cycle_power_mode();
-
-
-				// input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 1);
-				// input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 1);
-				// input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 1);
-				// input_sync(uniwill_keyboard_driver.input_device);
-				// input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 0);
-				// input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 0);
-				// input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 0);
-				// input_sync(uniwill_keyboard_driver.input_device);
 			}
 
 			// Keyboard backlight brightness toggle
