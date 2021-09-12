@@ -67,6 +67,15 @@
 #define UNIWILL_POWER_MODE(var) (var) & UNIWILL_POWER_MODE_MASK
 
 
+static u8 power_modes[] = {
+	UNIWILL_POWER_MODE_MIN, 
+	UNIWILL_POWER_MODE_MED, 
+	UNIWILL_POWER_MODE_MAX,
+};
+static u8 power_modes_count = sizeof(power_modes)/sizeof(power_modes[0]);
+static const u8 known_power_modes_count = sizeof(power_modes)/sizeof(power_modes[0]);
+
+
 struct tuxedo_keyboard_driver uniwill_keyboard_driver;
 
 struct kbd_led_state_uw_t {
@@ -254,22 +263,18 @@ u8 uniwill_get_power_mode(void)
 	
 	__uw_ec_read_addr(0x51, 0x07, &reg_read_return);
 
-	// Only 3 LED status are available
-	switch(UNIWILL_POWER_MODE(reg_read_return.bytes.data_low)){
-		case UNIWILL_POWER_MODE_MIN:
-			return 0x00;
-			break;
-		case UNIWILL_POWER_MODE_MED:
-			return 0x01;
-			break;
-		case UNIWILL_POWER_MODE_MAX:
-		case UNIWILL_POWER_MODE_MAX_ALT:
-			return 0x02;
-			break;
-		default:
-			TUXEDO_INFO("Unexpected mode for power mode (%0#6x) (%0#6x)\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low);
-			return 0xFF;
+	{
+		u8 current_power_mode = UNIWILL_POWER_MODE(reg_read_return.bytes.data_low);
+		u8 i;
+		for (i = 0; i < power_modes_count; i++) {
+			if (power_modes[i] == current_power_mode) {
+				return i;
+			}
+		}
 	}
+	TUXEDO_INFO("Unexpected mode for power mode (%0#6x) (%0#6x)\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low);
+	return 0xFF;
+
 }
 EXPORT_SYMBOL(uniwill_get_power_mode);
 
@@ -277,11 +282,11 @@ EXPORT_SYMBOL(uniwill_get_power_mode);
 typedef void (io_announce_event_func)(char, u8);
 extern io_announce_event_func io_announce_event;
 
-static int uniwill_warn_power_mode_update(int i){
+static int uniwill_warn_power_mode_update(int i) {
 	io_announce_event_func * announcing = symbol_get(io_announce_event);
 
 	pr_info("power updating %p", announcing);
-	if(announcing){
+	if (announcing) {
 		announcing(UNIWILL_POWER_MODE_EVENT, '0' + i);
 		pr_info("power updated %p", announcing);
 		symbol_put(io_announce_event);
@@ -295,9 +300,11 @@ u8 uniwill_set_power_mode(u8 to)
 	int write;
 	union uw_ec_read_return reg_read_return;
 	union uw_ec_write_return reg_write_return;
+	u8 to_before;
+	char* coherse_outcome;
 
-	if(unlikely(to > 3)){
-		TUXEDO_ERROR("Unknown power mode %d\n", to);
+	if (unlikely(to > known_power_modes_count)) { // Keep the 3 here
+		TUXEDO_ERROR("Unknown power mode. Only %d are known. %d given\n", known_power_modes_count, to);
 		return 255;
 	}
 
@@ -305,26 +312,15 @@ u8 uniwill_set_power_mode(u8 to)
 
 	write = UNIWILL_POWER_MODE_UNSET(reg_read_return.bytes.data_low);
 	
-	switch(to){
-		case 0x00:
-			TUXEDO_DEBUG("Power mode to min\n");
-			write |= UNIWILL_POWER_MODE_MIN;
-			uniwill_warn_power_mode_update(0);
-			break;
-		case 0x01:
-			TUXEDO_DEBUG("Power mode to medium\n");
-			uniwill_warn_power_mode_update(1);
-			break;
-		case 0x02:
-			TUXEDO_DEBUG("Power mode to max\n");
-			write |= UNIWILL_POWER_MODE_MAX;
-			uniwill_warn_power_mode_update(2);
-			break;
-		default:
-			TUXEDO_ERROR("Unexpected mode for power mode %0#6x -> (%0#6x) (%0#6x)\n", to, 
-				reg_read_return.bytes.data_high, reg_read_return.bytes.data_low);
-			return 255;
-	}
+	to_before = to;
+	to = to % power_modes_count;
+
+	coherse_outcome = to_before == to ? "kept" : "changed";
+
+	TUXEDO_DEBUG("Power mode requested to %d and %s to %d", to_before, coherse_outcome, to);
+
+	write |= power_modes[to];
+	uniwill_warn_power_mode_update(to);
 
 	TUXEDO_INFO("Writing new mode (%0#6x)(%0#6x) -> (%0#6x)(%0#6x)\n", reg_read_return.bytes.data_high, reg_read_return.bytes.data_low, write, write);
 	__uw_ec_write_addr(0x51, 0x07, write, write, &reg_write_return);
@@ -338,7 +334,7 @@ int uniwill_cycle_power_mode(void)
 {
 	u8 power_mode = uniwill_get_power_mode();
 	if (power_mode < 0xf0) {
-		return uniwill_set_power_mode((power_mode + 1) % 3);
+		return uniwill_set_power_mode((power_mode + 1) % power_modes_count);
 	}
 	TUXEDO_ERROR("Error with power mode. Unexpected (%0#6x)\n", power_mode);
 
@@ -641,7 +637,12 @@ static int uw_kbd_bl_init(struct platform_device *dev)
 static ssize_t uw_list_power_modes(struct device *child,
 				 struct device_attribute *attr, char *buffer)
 {
-	return sprintf(buffer, "%d\n%d\n%d\n", 0, 1, 2);
+	ssize_t size = 0;
+	u8 i;
+	for (i = 0; i < power_modes_count; i++) {
+		size += sprintf(buffer + size, "%d\n", i);
+	}
+	return size;
 }
 
 static ssize_t uw_power_mode_show(struct device *child,
@@ -656,7 +657,7 @@ static ssize_t uw_power_mode_store(struct device *child,
 				   const char *buffer, size_t size)
 {
 
-	switch(buffer[0]){
+	switch (buffer[0]) {
 		case '0':
 			uniwill_set_power_mode(0);
 			break;
