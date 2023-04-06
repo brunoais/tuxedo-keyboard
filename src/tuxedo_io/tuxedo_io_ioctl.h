@@ -95,6 +95,8 @@
 
 #define R_UW_PROFS_AVAILABLE	_IOR(MAGIC_READ_UW, 0x21, int32_t*)
 
+#define R_UW_POWER_MODE		_IOR(MAGIC_READ_UW, 0x22, int32_t*)
+
 // Write
 #define W_UW_FANSPEED		_IOW(MAGIC_WRITE_UW, 0x10, int32_t*)
 #define W_UW_FANSPEED2		_IOW(MAGIC_WRITE_UW, 0x11, int32_t*)
@@ -108,4 +110,5 @@
 
 #define W_UW_PERF_PROF		_IOW(MAGIC_WRITE_UW, 0x18, int32_t*)
 
+#define W_UW_POWER_MODE	_IOW(MAGIC_WRITE_UW, 0x19, int32_t*)
 #endif
