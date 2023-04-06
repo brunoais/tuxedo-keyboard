@@ -663,11 +663,7 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 			copy_result = copy_to_user((void *) arg, &result, sizeof(result));
 			break;
 		case R_UW_PROFS_AVAILABLE:
-			result = 0;
-			if (uw_feats->uniwill_profile_v1_two_profs)
-				result = 2;
-			else if (uw_feats->uniwill_profile_v1_three_profs || uw_feats->uniwill_profile_v1_three_profs_leds_only)
-				result = 3;
+			result = uw_feats->uniwill_profile_v1_count;
 			copy_result = copy_to_user((void *) arg, &result, sizeof(result));
 			break;
 #ifdef DEBUG

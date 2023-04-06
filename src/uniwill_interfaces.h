@@ -107,10 +107,12 @@ struct uniwill_device_features_t {
 	 *   graphics card often called "power save", "balanced"
 	 *   and "enthusiast"
 	 */
-	bool uniwill_profile_v1;
-	bool uniwill_profile_v1_two_profs;
-	bool uniwill_profile_v1_three_profs;
-	bool uniwill_profile_v1_three_profs_leds_only;
+	u8 uniwill_profile_v1_count;
+	/**
+	 * Means: Only LEDs change when applying changes to the power
+	 * profile and no other changes are programmed to EC.
+	 */
+	u8 uniwill_profile_v1_leds_only;
 	bool uniwill_has_charging_prio;
 	bool uniwill_has_charging_profile;
 	bool uniwill_has_universal_ec_fan_control;
