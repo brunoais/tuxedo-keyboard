@@ -25,3 +25,7 @@ rpm
 deb/tuxedo-keyboard-*
 *.deb
 *.rpm
+
+
+# space-separated extra services to restart when reloading modules
+.extra_restart
