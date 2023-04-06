@@ -522,6 +522,7 @@ static u32 uw_set_performance_profile_v1(u8 profile_index)
 	u8 current_value = 0x00, next_value;
 	u8 clear_bits = 0xa0 | 0x10;
 	u32 result;
+
 	result = uniwill_read_ec_ram(0x0751, &current_value);
 	if (result >= 0) {
 		next_value = current_value & ~clear_bits;
@@ -669,11 +670,7 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 			copy_result = copy_to_user((void *) arg, &result, sizeof(result));
 			break;
 		case R_UW_PROFS_AVAILABLE:
-			result = 0;
-			if (uw_feats->uniwill_profile_v1_two_profs)
-				result = 2;
-			else if (uw_feats->uniwill_profile_v1_three_profs || uw_feats->uniwill_profile_v1_three_profs_leds_only)
-				result = 3;
+			result = uw_feats->uniwill_profile_v1_count;
 			copy_result = copy_to_user((void *) arg, &result, sizeof(result));
 			break;
 #ifdef DEBUG

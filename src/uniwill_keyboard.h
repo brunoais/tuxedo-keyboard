@@ -1179,14 +1179,18 @@ struct uniwill_device_features_t *uniwill_get_device_features(void)
 		feats_loaded = false;
 	}
 
-	uw_feats->uniwill_profile_v1_two_profs = false
+	uw_feats->uniwill_profile_v1_count = 0;
+	uw_feats->uniwill_profile_v1_leds_only = false;
+
+	if(false
 		|| dmi_match(DMI_BOARD_NAME, "PF5PU1G")
 		|| dmi_match(DMI_BOARD_NAME, "PULSE1401")
 		|| dmi_match(DMI_BOARD_NAME, "PULSE1501")
-	;
-
-	uw_feats->uniwill_profile_v1_three_profs = false
-	// Devices with "classic" profile support
+		)
+	{
+		uw_feats->uniwill_profile_v1_count = 2;
+	}
+	else if(false
 		|| dmi_match(DMI_BOARD_NAME, "POLARIS1501A1650TI")
 		|| dmi_match(DMI_BOARD_NAME, "POLARIS1501A2060")
 		|| dmi_match(DMI_BOARD_NAME, "POLARIS1501I1650TI")
@@ -1195,14 +1199,11 @@ struct uniwill_device_features_t *uniwill_get_device_features(void)
 		|| dmi_match(DMI_BOARD_NAME, "POLARIS1701A2060")
 		|| dmi_match(DMI_BOARD_NAME, "POLARIS1701I1650TI")
 		|| dmi_match(DMI_BOARD_NAME, "POLARIS1701I2060")
-		// Note: XMG Fusion removed for now, seem to have
-		// neither same power profile control nor TDP set
-		//|| dmi_match(DMI_BOARD_NAME, "LAPQC71A")
-		//|| dmi_match(DMI_BOARD_NAME, "LAPQC71B")
-		//|| dmi_match(DMI_PRODUCT_NAME, "A60 MUV")
-	;
-
-	uw_feats->uniwill_profile_v1_three_profs_leds_only = false
+		)
+	{
+		uw_feats->uniwill_profile_v1_count = 3;
+	}
+	else if(false
 	// Devices where profile mainly controls power profile LED status
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 18, 0)
 		|| dmi_match(DMI_PRODUCT_SKU, "POLARIS1XA02")
@@ -1214,11 +1215,11 @@ struct uniwill_device_features_t *uniwill_get_device_features(void)
 		|| dmi_match(DMI_PRODUCT_SKU, "STELLARIS1XI04")
 		|| dmi_match(DMI_PRODUCT_SKU, "STEPOL1XA04")
 #endif
-	;
-
-	uw_feats->uniwill_profile_v1 =
-		uw_feats->uniwill_profile_v1_two_profs ||
-		uw_feats->uniwill_profile_v1_three_profs;
+		)
+	{
+		uw_feats->uniwill_profile_v1_count = 3;
+		uw_feats->uniwill_profile_v1_leds_only = true;
+	}
 
 	if (uw_has_charging_priority(&uw_feats->uniwill_has_charging_prio) != 0)
 		feats_loaded = false;
@@ -1249,7 +1250,7 @@ static int uniwill_keyboard_probe(struct platform_device *dev)
 	// uw_ec_write_addr(0x51, 0x07, 0x00, 0x00, &reg_write_return);
 	uniwill_write_ec_ram(0x0751, 0x00);
 
-	if (uw_feats->uniwill_profile_v1) {
+	if (uw_feats->uniwill_profile_v1_count > 0) {
 		// Set manual-mode fan-curve in 0x0743 - 0x0747
 		// Some kind of default fan-curve is stored in 0x0786 - 0x078a: Using it to initialize manual-mode fan-curve
 		for (i = 0; i < 5; ++i) {
