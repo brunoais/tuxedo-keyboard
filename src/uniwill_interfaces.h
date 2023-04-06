@@ -138,4 +138,7 @@ union uw_ec_write_return {
 	} bytes;
 };
 
+
+#define UW_POWER_MODE_EVENT 'P'
+
 #endif

@@ -18,6 +18,8 @@
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 #include <linux/kernel.h>
+#include <linux/kfifo.h>
+#include <linux/miscdevice.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/device.h>
@@ -42,6 +44,13 @@ MODULE_ALIAS("wmi:" CLEVO_WMI_METHOD_GUID);
 MODULE_ALIAS("wmi:" UNIWILL_WMI_MGMT_GUID_BA);
 MODULE_ALIAS("wmi:" UNIWILL_WMI_MGMT_GUID_BB);
 MODULE_ALIAS("wmi:" UNIWILL_WMI_MGMT_GUID_BC);
+
+
+static void io_announce_event(char event, char msg);
+typedef void (uniwill_set_power_mode_func)(u8);
+extern uniwill_set_power_mode_func uniwill_set_power_mode;
+
+
 
 // Initialized in module init, global for ioctl interface
 static u32 id_check_clevo;
@@ -206,7 +215,7 @@ static long clevo_ioctl_interface(struct file *file, unsigned int cmd, unsigned 
 
 	const char str_no_if[] = "";
 	char *str_clevo_if;
-	
+
 	switch (cmd) {
 		case R_CL_HW_IF_STR:
 			if (clevo_get_active_interface_id(&str_clevo_if) == 0) {
@@ -526,6 +535,115 @@ static int uw_set_tdp(u8 tdp_index, u8 tdp_data)
 	return 0;
 }
 
+struct event_stream_t
+{
+	DECLARE_KFIFO(event_queue, char, (1 << 10));
+	spinlock_t kfifo_lock;
+
+	wait_queue_head_t lock;
+	struct list_head next_prev_stream;
+};
+
+LIST_HEAD(event_streams);
+
+
+static void io_announce_event(char event, char msg){
+
+	struct event_stream_t *event_stream;
+	list_for_each_entry ( event_stream , &event_streams, next_prev_stream )
+	{
+		if (kfifo_avail(&event_stream->event_queue) < 5) {
+
+			unsigned long _flags;
+			spin_lock_irqsave(&event_stream->kfifo_lock, _flags);
+			while (kfifo_avail(&event_stream->event_queue) < 6)
+			{
+				kfifo_skip(&event_stream->event_queue);
+			}
+			spin_unlock_irqrestore(&event_stream->kfifo_lock, _flags);
+			// Warn the reader that he lost events and may need to update itself using ioctl calls
+			kfifo_put(&event_stream->event_queue, '\177');
+
+		}
+
+		// This format allows future proofing for more flexibility towards potential longer data in the future
+
+		kfifo_put(&event_stream->event_queue, '\2');
+		kfifo_put(&event_stream->event_queue, event);
+		kfifo_put(&event_stream->event_queue, '\36');
+		kfifo_put(&event_stream->event_queue, msg);
+		kfifo_put(&event_stream->event_queue, '\3');
+
+		wake_up(&event_stream->lock);
+	}
+
+}
+void io_ext_announce_event(char event, char msg) {
+	return io_ext_announce_event(event, msg);
+}
+EXPORT_SYMBOL(io_ext_announce_event);
+
+static int open_for_events(struct inode *inode, struct file *file)
+{
+	struct event_stream_t *event_stream = vmalloc(sizeof(struct event_stream_t));
+	if(!event_stream){
+		return -ENOMEM;
+	}
+	init_waitqueue_head(&event_stream->lock);
+	INIT_KFIFO(event_stream->event_queue);
+	spin_lock_init(&event_stream->kfifo_lock);
+
+	file->private_data = event_stream;
+
+	list_add_tail(&event_stream->next_prev_stream, &event_streams);
+
+	pr_info("Opening!");
+
+    return 0;
+}
+
+static ssize_t read_events(struct file *file, char __user *user_buffer, size_t size, loff_t *offset)
+{
+	struct event_stream_t *event_stream = (struct event_stream_t *) file->private_data;
+	// ssize_t len = min(my_data->size - *offset, size);
+	int copied_size = 0;
+
+	if(wait_event_interruptible(event_stream->lock, !kfifo_is_empty(&event_stream->event_queue))){
+		return -EINTR;
+	}
+
+	if (size < 1) {
+		return 0;
+	}
+
+	// Locking here should be impossible. If this locks, it's for the storing process above
+	{
+		unsigned long _flags;
+		int kfifo_result; // can only be logged
+		spin_lock_irqsave(&event_stream->kfifo_lock, _flags);
+		kfifo_result = kfifo_to_user(&event_stream->event_queue, user_buffer, size, &copied_size);
+		if(kfifo_result < 0){
+			pr_err("kfifo failed to send the contents to the user. Sending to buffer: (%p)", &user_buffer);
+		}
+		spin_unlock_irqrestore(&event_stream->kfifo_lock, _flags);
+	}
+
+	*offset += copied_size;
+	return copied_size;
+}
+
+static int closed_for_events(struct inode *inode, struct file *file)
+{
+	struct event_stream_t *event_stream = (struct event_stream_t *) file->private_data;
+
+	list_del(&event_stream->next_prev_stream);
+	vfree(event_stream);
+
+	pr_info("Closing");
+	return 0;
+}
+
+
 /**
  * Set profile 1-3 to 0xa0, 0x00 or 0x10 depending on
  * device support.
@@ -560,6 +678,16 @@ static u32 uw_set_performance_profile_v1(u8 profile_index)
 
 	return result;
 }
+
+u32 uw_ext_set_performance_profile_v1(u8 profile_index){
+	if ( 0 <= profile_index || profile_index > uw_feats->uniwill_profile_v1_count)
+	{
+		return -EINVAL;
+	}
+	return uw_set_performance_profile_v1(profile_index);
+}
+EXPORT_SYMBOL(uw_ext_set_performance_profile_v1);
+
 
 static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -616,6 +744,11 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 		case R_UW_MODE:
 			uniwill_read_ec_ram(0x0751, &byte_data);
 			result = byte_data;
+			copy_result = copy_to_user((void *) arg, &result, sizeof(result));
+			break;
+		case R_UW_POWER_MODE:
+			uniwill_read_ec_ram(0x0751, &byte_data);
+			result = byte_data & 0x90;
 			copy_result = copy_to_user((void *) arg, &result, sizeof(result));
 			break;
 		case R_UW_MODE_ENABLE:
@@ -718,6 +851,14 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 			copy_result = copy_from_user(&argument, (int32_t *) arg, sizeof(argument));
 			uniwill_write_ec_ram(0x0751, argument & 0xff);
 			break;
+		case W_UW_POWER_MODE:
+			copy_result = copy_from_user(&argument, (int32_t *) arg, sizeof(argument));
+			uniwill_read_ec_ram(0x0751, &byte_data);
+			result = byte_data;
+			argument &= 0x90;
+			argument |= result & (~ 0x90);
+			uniwill_write_ec_ram(0x0751, argument & 0xff);
+			break;
 		case W_UW_MODE_ENABLE:
 			// Note: Is for the moment set and cleared on init/exit of module (uniwill mode)
 			/*
@@ -768,6 +909,46 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 
 	return 0;
 }
+
+
+static struct file_operations fops_dev_evt = {
+	.owner				= THIS_MODULE,
+//	.unlocked_ioctl		= fop_ioctl
+	.open				= open_for_events,
+	.read				= read_events,
+	.release			= closed_for_events
+};
+
+
+static struct miscdevice user_events_device = {
+	.minor	= MISC_DYNAMIC_MINOR,
+	.name	= "tuxedo!user_events",
+	.fops	= &fops_dev_evt,
+	.mode	= 0444,
+};
+
+
+
+static int create_events_inode(void){
+
+	int err;
+
+	err = misc_register(&user_events_device);
+	if (err != 0) {
+		pr_err("Failed to allocate user_events\n");
+		return err;
+	}
+	return 0;
+
+
+}
+
+static void __exit remove_events_file(void)
+{
+	misc_deregister(&user_events_device);
+	pr_debug("Module events exit\n");
+}
+
 
 static long fop_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 {
@@ -846,13 +1027,16 @@ static int __init tuxedo_io_init(void)
 #endif
 
 	device_create(tuxedo_io_device_class, NULL, tuxedo_io_device_handle, NULL, "tuxedo_io");
+	create_events_inode();
 	pr_debug("Module init successful\n");
-	
+
 	return 0;
 }
 
 static void __exit tuxedo_io_exit(void)
 {
+	remove_events_file();
+
 	device_destroy(tuxedo_io_device_class, tuxedo_io_device_handle);
 	class_destroy(tuxedo_io_device_class);
 	cdev_del(&tuxedo_io_cdev);
