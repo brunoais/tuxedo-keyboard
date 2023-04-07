@@ -50,6 +50,8 @@
 
 #define UNIWILL_OSD_TOUCHPADWORKAROUND		0xFFF
 
+int uw_cycle_power_mode(void);
+
 static void uw_charging_priority_write_state(void);
 static void uw_charging_profile_write_state(void);
 
@@ -1059,6 +1061,52 @@ static int set_rom_id(void) {
 		pr_debug("ROMID is correct.\n");
 
 	return 0;
+}
+
+
+static u8 uw_get_power_mode(void)
+{
+	typedef u8 (uw_get_power_mode_func)(void);
+	extern uw_get_power_mode_func uw_ext_get_power_mode;
+
+	uw_get_power_mode_func * get_power_mode = symbol_get(uw_ext_get_power_mode);
+
+	if (get_power_mode) {
+		u8 mode = get_power_mode();
+		symbol_put(uw_ext_get_power_mode);
+		return mode;
+	}
+	return 0;
+}
+
+
+u32 uw_set_performance_profile_v1(u8 profile_index)
+{
+	typedef u32 (uw_set_performance_profile_v1_func)(u8);
+	extern uw_set_performance_profile_v1_func uw_ext_set_performance_profile_v1;
+
+	uw_set_performance_profile_v1_func * set_power_mode = symbol_get(uw_ext_set_performance_profile_v1);
+
+	if (set_power_mode) {
+		u8 mode = set_power_mode(profile_index);
+		symbol_put(uw_ext_set_performance_profile_v1);
+		return mode;
+	}
+	return 0;
+}
+
+
+int uw_cycle_power_mode(void)
+{
+	u8 power_mode = uw_get_power_mode();
+	if (unlikely(power_mode < 0xf0))
+	{
+		struct uniwill_device_features_t *uw_feats = &uniwill_device_features;
+		return uw_set_performance_profile_v1((power_mode % uw_feats->uniwill_profile_v1_count) + 1);
+	}
+	pr_err("Error with power mode. Unexpected (%0#6x)\n", power_mode);
+
+	return power_mode;
 }
 
 static int has_universal_ec_fan_control(void) {
