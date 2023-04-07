@@ -707,6 +707,9 @@ static u32 uw_set_performance_profile_v1(u8 profile_index)
 
 		if (result != -EINVAL) {
 			result = uniwill_write_ec_ram(0x0751, next_value);
+			if (result == 0) {
+				io_announce_event(UW_POWER_MODE_EVENT, '0' + (profile_index - 1));
+			}
 		}
 	}
 
