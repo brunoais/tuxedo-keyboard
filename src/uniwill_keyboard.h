@@ -278,16 +278,8 @@ void uniwill_event_callb(u32 code)
 {
 	switch (code) {
 		case UNIWILL_OSD_MODE_CHANGE_KEY_EVENT:
-			// Special key combination when mode change key is pressed (the one next to
-			// the power key). Opens TCC by default when installed.
-			input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 1);
-			input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 1);
-			input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 1);
-			input_sync(uniwill_keyboard_driver.input_device);
-			input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 0);
-			input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 0);
-			input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 0);
-			input_sync(uniwill_keyboard_driver.input_device);
+			TUXEDO_INFO("Power mode pressed\n");
+			uw_cycle_power_mode();
 			break;
 		case UNIWILL_OSD_DC_ADAPTER_CHANGE:
 			// Refresh keyboard state and charging prio on cable switch event
