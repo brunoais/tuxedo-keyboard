@@ -354,14 +354,8 @@ void uniwill_event_callb(u32 code)
 
 	// Special key combination when mode change key is pressed
 	if (code == 0xb0) {
-		input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 1);
-		input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 1);
-		input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 1);
-		input_sync(uniwill_keyboard_driver.input_device);
-		input_report_key(uniwill_keyboard_driver.input_device, KEY_F6, 0);
-		input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTALT, 0);
-		input_report_key(uniwill_keyboard_driver.input_device, KEY_LEFTMETA, 0);
-		input_sync(uniwill_keyboard_driver.input_device);
+		TUXEDO_INFO("Power mode pressed\n");
+		uw_cycle_power_mode();
 	}
 
 	// Keyboard backlight brightness toggle
