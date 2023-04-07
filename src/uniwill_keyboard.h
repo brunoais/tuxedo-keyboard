@@ -57,6 +57,8 @@
 #define UNIWILL_BRIGHTNESS_DEFAULT		UNIWILL_BRIGHTNESS_MAX * 0.30
 #define UNIWILL_COLOR_DEFAULT			0xffffff
 
+int uw_cycle_power_mode(void);
+
 static void uw_charging_priority_write_state(void);
 static void uw_charging_profile_write_state(void);
 
@@ -438,7 +440,7 @@ static ssize_t uw_color_string_store(struct device *child,
 {
 	u32 color_value;
 	char *buffer_copy;
-	
+
 	buffer_copy = kmalloc(size + 1, GFP_KERNEL);
 	strcpy(buffer_copy, buffer);
 	color_value = color_lookup(&color_list, strstrip(buffer_copy));
@@ -1162,6 +1164,52 @@ static ssize_t uw_charging_prio_store(struct device *child,
 		return -EINVAL;
 }
 
+
+
+static u8 uw_get_power_mode(void)
+{
+	typedef u8 (uw_get_power_mode_func)(void);
+	extern uw_get_power_mode_func uw_ext_get_power_mode;
+
+	uw_get_power_mode_func * get_power_mode = symbol_get(uw_ext_get_power_mode);
+
+	if (get_power_mode) {
+		u8 mode = get_power_mode();
+		symbol_put(get_power_mode);
+		return mode;
+	}
+	return 0;
+}
+
+
+u32 uw_set_performance_profile_v1(u8 profile_index)
+{
+	typedef u32 (uw_set_performance_profile_v1_func)(u8);
+	extern uw_set_performance_profile_v1_func uw_ext_set_performance_profile_v1;
+
+	uw_set_performance_profile_v1_func * set_power_mode = symbol_get(uw_ext_set_performance_profile_v1);
+
+	if (set_power_mode) {
+		u8 mode = set_power_mode(profile_index);
+		symbol_put(set_power_mode);
+		return mode;
+	}
+	return 0xFF;
+}
+
+
+int uw_cycle_power_mode(void)
+{
+	u8 power_mode = uw_get_power_mode();
+	if (unlikely(power_mode < 0xf0))
+	{
+		struct uniwill_device_features_t *uw_feats = &uniwill_device_features;
+		return uw_set_performance_profile_v1((power_mode % uw_feats->uniwill_profile_v1_count) + 1);
+	}
+	pr_err("Error with power mode. Unexpected (%0#6x)\n", power_mode);
+
+	return power_mode;
+}
 struct uniwill_device_features_t *uniwill_get_device_features(void)
 {
 	struct uniwill_device_features_t *uw_feats = &uniwill_device_features;
