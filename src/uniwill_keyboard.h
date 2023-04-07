@@ -1091,14 +1091,95 @@ u32 uw_set_performance_profile_v1(u8 profile_index)
 int uw_cycle_power_mode(void)
 {
 	u8 power_mode = uw_get_power_mode();
-	if (unlikely(power_mode < 0xf0))
+	if (power_mode > 0x00 && power_mode < 0x04)
 	{
 		struct uniwill_device_features_t *uw_feats = &uniwill_device_features;
 		return uw_set_performance_profile_v1((power_mode % uw_feats->uniwill_profile_v1_count) + 1);
 	}
-	pr_err("Error with power mode. Unexpected (%0#6x)\n", power_mode);
+	pr_err("Error with power mode. Unexpected (%0#8x)\n", power_mode);
 
 	return power_mode;
+}
+
+static bool uw_power_mode_loaded = false;
+static ssize_t uw_list_power_modes(struct device *child,
+				 struct device_attribute *attr, char *buffer)
+{
+	struct uniwill_device_features_t *uw_feats = &uniwill_device_features;
+	ssize_t size = 0;
+	u8 i;
+	for (i = 0; i < uw_feats->uniwill_profile_v1_count; i++) {
+		size += sysfs_emit_at(buffer, size, "%d\n", i);
+	}
+	return size;
+}
+
+
+static ssize_t uw_power_mode_show(struct device *child,
+				 struct device_attribute *attr, char *buffer)
+{
+	u8 mode = uw_get_power_mode();
+	return sysfs_emit(buffer, "%d\n", mode);
+}
+
+
+
+static ssize_t uw_power_mode_store(struct device *child,
+					struct device_attribute *attr,
+					const char *buffer, size_t size)
+{
+
+	u8 digit = buffer[0] + '0';
+
+	if (buffer[0] == 'c') {
+		uw_cycle_power_mode();
+	} else {
+		u8 result = uw_set_performance_profile_v1(digit);
+		if (result == -EINVAL)
+		{
+			return result;
+		}
+	}
+
+	return size;
+}
+
+
+
+// Device attributes used by uw kbd
+struct uw_power_mode_dev_attrs_t {
+	struct device_attribute available_power_modes;
+	struct device_attribute power_mode;
+} uw_power_mode_dev_attrs = {
+	.available_power_modes = __ATTR(available_power_modes, 0444, uw_list_power_modes, NULL),
+	.power_mode = __ATTR(power_mode, 0644, uw_power_mode_show, uw_power_mode_store)
+};
+
+// Device attributes used for uw_power_mode
+static struct attribute *uw_power_mode_attrs[] = {
+	&uw_power_mode_dev_attrs.available_power_modes.attr,
+	&uw_power_mode_dev_attrs.power_mode.attr,
+	NULL
+};
+
+static struct attribute_group uw_power_mode_attr_group = {
+	.name = "uw_power_mode",
+	.attrs = uw_power_mode_attrs
+};
+
+
+static void uw_power_mode_init(struct platform_device *dev)
+{
+	struct uniwill_device_features_t *uw_feats = &uniwill_device_features;
+
+	if (uw_feats->uniwill_profile_v1_count > 0)
+	{
+		uw_power_mode_loaded = sysfs_create_group(&dev->dev.kobj, &uw_power_mode_attr_group) == 0;
+		if (!uw_power_mode_loaded) {
+			TUXEDO_ERROR("Failed to create sysfs power mode group\n");
+		}
+	}
+
 }
 
 static int has_universal_ec_fan_control(void) {
@@ -1251,6 +1332,7 @@ static int uniwill_keyboard_probe(struct platform_device *dev)
 
 	uw_charging_priority_init(dev);
 	uw_charging_profile_init(dev);
+	uw_power_mode_init(dev);
 
 	return 0;
 }
@@ -1262,6 +1344,9 @@ static int uniwill_keyboard_remove(struct platform_device *dev)
 
 	if (uw_charging_profile_loaded)
 		sysfs_remove_group(&dev->dev.kobj, &uw_charging_profile_attr_group);
+
+	if (uw_power_mode_loaded)
+		sysfs_remove_group(&dev->dev.kobj, &uw_power_mode_attr_group);
 
 	uniwill_leds_remove(dev);
 
