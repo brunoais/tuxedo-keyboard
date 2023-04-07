@@ -645,6 +645,40 @@ static int closed_for_events(struct inode *inode, struct file *file)
 
 
 /**
+ * In hardware, the 2 bits for the power mode are (hardware or firmware) implemented as:
+ * 1st bit set? -> Power mode 2, 2 LED ON
+ * 2nd bit set? -> Power mode 0, 1 LED ON (bottom one)
+ * Otherwise -> power mode 1, 0 LED ON
+ * I've tried only setting the 1st LED without setting the 2nd one.
+ * That lead to both LED being ON regardless of the 2nd bit.
+ * Tested on Tuxedo Polaris Gen1
+ *
+ */
+u8 uw_get_power_mode(void)
+{
+	u8 power_mode_data;
+	u8 clear_bits = 0xa0 | 0x10;
+	uniwill_read_ec_ram(0x0751, &power_mode_data);
+	switch (power_mode_data & clear_bits) {
+		case 0xa0:
+		case 0x80:
+			return 0x01;
+		case 0x00:
+			return 0x02;
+		case 0x10:
+		case 0x90:
+			return 0x03;
+	}
+	pr_info("Unexpected mode for power mode (%0#8x)\n", power_mode_data);
+	return 0xFF;
+}
+u8 uw_ext_get_power_mode(void)
+{
+	return uw_get_power_mode();
+}
+EXPORT_SYMBOL(uw_ext_get_power_mode);
+
+/**
  * Set profile 1-3 to 0xa0, 0x00 or 0x10 depending on
  * device support.
  */
@@ -680,7 +714,7 @@ static u32 uw_set_performance_profile_v1(u8 profile_index)
 }
 
 u32 uw_ext_set_performance_profile_v1(u8 profile_index){
-	if ( 0 <= profile_index || profile_index > uw_feats->uniwill_profile_v1_count)
+	if ( 0 == profile_index || profile_index > uw_feats->uniwill_profile_v1_count + 1)
 	{
 		return -EINVAL;
 	}
