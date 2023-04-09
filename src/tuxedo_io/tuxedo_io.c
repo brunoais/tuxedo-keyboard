@@ -874,6 +874,10 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 			break;
 		case W_UW_MODE:
 			copy_result = copy_from_user(&argument, (int32_t *) arg, sizeof(argument));
+			uniwill_read_ec_ram(0x0751, &byte_data);
+			result = byte_data;
+			argument &= ~ 0x90;
+			argument |= result & 0x90;
 			uniwill_write_ec_ram(0x0751, argument & 0xff);
 			break;
 		case W_UW_POWER_MODE:
@@ -908,7 +912,8 @@ static long uniwill_ioctl_interface(struct file *file, unsigned int cmd, unsigne
 			break;
 		case W_UW_PERF_PROF:
 			copy_result = copy_from_user(&argument, (int32_t *) arg, sizeof(argument));
-			uw_set_performance_profile_v1(argument);
+			// Block from setting performance. Too annoying
+			// uw_set_performance_profile_v1(argument);
 			break;
 #ifdef DEBUG
 		case W_TF_BC:
