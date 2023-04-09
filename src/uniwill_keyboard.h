@@ -1169,7 +1169,7 @@ static u8 uw_get_power_mode(void)
 
 	if (get_power_mode) {
 		u8 mode = get_power_mode();
-		symbol_put(get_power_mode);
+		symbol_put(uw_ext_get_power_mode);
 		return mode;
 	}
 	return 0;
@@ -1185,7 +1185,7 @@ u32 uw_set_performance_profile_v1(u8 profile_index)
 
 	if (set_power_mode) {
 		u8 mode = set_power_mode(profile_index);
-		symbol_put(set_power_mode);
+		symbol_put(uw_ext_set_performance_profile_v1);
 		return mode;
 	}
 	return 0xFF;
@@ -1212,7 +1212,7 @@ static ssize_t uw_list_power_modes(struct device *child,
 	struct uniwill_device_features_t *uw_feats = &uniwill_device_features;
 	ssize_t size = 0;
 	u8 i;
-	for (i = 0; i < uw_feats->uniwill_profile_v1_count; i++) {
+	for (i = 1; i <= uw_feats->uniwill_profile_v1_count; i++) {
 		size += sysfs_emit_at(buffer, size, "%d\n", i);
 	}
 	return size;
@@ -1278,7 +1278,7 @@ static void uw_power_mode_init(struct platform_device *dev)
 
 	if (uw_feats->uniwill_profile_v1_count > 0)
 	{
-		uw_power_mode_loaded = sysfs_create_group(&dev->dev.kobj, &uw_power_mode_attr_group);
+		uw_power_mode_loaded = sysfs_create_group(&dev->dev.kobj, &uw_power_mode_attr_group) == 0;
 		if (!uw_power_mode_loaded) {
 			TUXEDO_ERROR("Failed to create sysfs power mode group\n");
 		}
