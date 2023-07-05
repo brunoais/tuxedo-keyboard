@@ -34,7 +34,7 @@
 
 MODULE_DESCRIPTION("Hardware interface for TUXEDO laptops");
 MODULE_AUTHOR("TUXEDO Computers GmbH <tux@tuxedocomputers.com>");
-MODULE_VERSION("0.3.5");
+MODULE_VERSION("0.3.6");
 MODULE_LICENSE("GPL");
 
 MODULE_ALIAS_CLEVO_INTERFACES();
@@ -52,7 +52,7 @@ static struct uniwill_device_features_t *uw_feats;
 /**
  * strstr version of dmi_match
  */
-static bool dmi_string_in(enum dmi_field f, const char *str)
+static bool __attribute__ ((unused)) dmi_string_in(enum dmi_field f, const char *str)
 {
 	const char *info = dmi_get_system_info(f);
 
@@ -823,7 +823,13 @@ static int __init tuxedo_io_init(void)
 		pr_err("Failed to add cdev\n");
 		unregister_chrdev_region(tuxedo_io_device_handle, 1);
 	}
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 4, 0)
 	tuxedo_io_device_class = class_create(THIS_MODULE, "tuxedo_io");
+#else
+	tuxedo_io_device_class = class_create("tuxedo_io");
+#endif
+
 	device_create(tuxedo_io_device_class, NULL, tuxedo_io_device_handle, NULL, "tuxedo_io");
 	pr_debug("Module init successful\n");
 	
